@@ -1,10 +1,10 @@
 // Use this file to store all of the private credentials 
 // and connection details
-// WiFi credentials
-#define SECRET_SSID "Packtur"        // replace MySSID with your WiFi network name
-#define SECRET_PASS "Julieta2022."    // replace MyPassword with your WiFi password
+// Credenciales de red WiFi
+#define SECRET_SSID "Packtur"         // Nombre de tu red WiFi
+#define SECRET_PASS "Julieta2022."    // Contraseña de tu red WiFi
 
-// ThingSpeak channel details
-#define SECRET_CH_ID 2782709               // replace 0000000 with your channel number
-#define SECRET_WRITE_APIKEY "A0T3NQX2W7RSGMOW" // replace XYZ with your channel write API Key
-#define SECRET_READ_APIKEY "BIQ169NLKIRSRNIO" // replace YOUR_READ_API_KEY with your channel read API Key
+// Detalles del canal ThingSpeak
+#define SECRET_CH_ID 2782709               // Número del canal
+#define SECRET_WRITE_APIKEY "A0T3NQX2W7RSGMOW" // Clave API de escritura
+#define SECRET_READ_APIKEY "FQ7RL8L4TV3RK4K0"  // Clave API de lectura

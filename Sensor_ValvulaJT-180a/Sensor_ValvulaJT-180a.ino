@@ -26,14 +26,9 @@
 #include "secrets.h"
 #include "ThingSpeak.h" // Siempre incluir después de otros encabezados
 
-// Configuración de red WiFi
-char ssid[] = "Packtur";          // Nombre de tu red WiFi
-char pass[] = "Julieta2022.";     // Contraseña de tu red WiFi
-WiFiClient client;
 
-// Configuración de ThingSpeak
-unsigned long myChannelNumber = SECRET_CH_ID;       // ID del canal en ThingSpeak
-const char *myWriteAPIKey = SECRET_WRITE_APIKEY;    // API Key de escritura
+// Configuración de red WiFi
+WiFiClient client;
 
 // Pines del sensor ultrasónico
 const int Trigger = 13;  // Pin TRIG del sensor
@@ -44,7 +39,15 @@ const int bombaPin = 5;  // Pin digital para controlar la bomba (usa un transist
 
 // Niveles de agua
 const int DISTANCIA_VACIO = 24;  // Distancia considerada como estanque vacío (cm)
-const int DISTANCIA_LLENO = 14;  // Distancia considerada como estanque lleno (cm)
+const int DISTANCIA_LLENO = 20;  // Distancia considerada como estanque lleno (cm)
+
+// Channel details
+unsigned long channelID = SECRET_CH_ID;
+unsigned int fieldsensor = 1;
+unsigned int fieldBomba = 2;
+
+// Estado inicial de la bomba
+bool bombaEncendida = false; // Variable para rastrear si la bomba está encendida
 
 void setup() {
   Serial.begin(115200);           // Inicializa la comunicación serial
@@ -55,60 +58,82 @@ void setup() {
   digitalWrite(bombaPin, LOW);    // Apaga la bomba al inicio
 
   WiFi.mode(WIFI_STA);            // Configura el ESP8266 como estación
+  WiFi.begin(SECRET_SSID, SECRET_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConexión WiFi establecida.");
   ThingSpeak.begin(client);       // Inicializa ThingSpeak
 }
 
+long medirDistanciaPromedio() {
+  long suma = 0;
+  int mediciones = 5; // Número de mediciones para promediar
+
+  for (int i = 0; i < mediciones; i++) {
+    digitalWrite(Trigger, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(Trigger, LOW);
+
+    long duration = pulseIn(Echo, HIGH);
+    long distance = duration * 0.034 / 2;
+
+    suma += distance;
+    delay(10); // Pequeña pausa entre mediciones
+  }
+
+  return suma / mediciones; // Retorna la distancia promedio
+}
+
 void loop() {
-  // Conexión a WiFi
+  // Verificar conexión WiFi
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.print("Intentando conectar a WiFi: ");
-    Serial.println(ssid);
+    Serial.println("Desconectado de WiFi. Reconectando...");
     while (WiFi.status() != WL_CONNECTED) {
-      WiFi.begin(ssid, pass);
-      Serial.print(".");
+      WiFi.begin(SECRET_SSID, SECRET_PASS);
       delay(5000);
     }
-    Serial.println("\nConexión WiFi establecida.");
+    Serial.println("Reconectado a WiFi.");
   }
 
-  // Medición de distancia con el sensor HC-SR04
-  long duration;  // Duración del pulso
-  long distance;  // Distancia calculada en cm
+  // Leer valores desde ThingSpeak
+  long valor_Sensor = ThingSpeak.readLongField(channelID, fieldsensor, SECRET_READ_APIKEY);
+  long valor_Bomba = ThingSpeak.readLongField(channelID, fieldBomba, SECRET_READ_APIKEY);
 
-  // Enviar pulso al Trigger
-  digitalWrite(Trigger, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(Trigger, LOW);
+  Serial.print("Valor Sensor: ");
+  Serial.println(valor_Sensor);
+  Serial.print("Valor Bomba: ");
+  Serial.println(valor_Bomba);
 
-  // Leer el tiempo del pulso en el Echo
-  duration = pulseIn(Echo, HIGH);
+  // Escribir valores en los pines
+  digitalWrite(Trigger, valor_Sensor ? HIGH : LOW);
+  digitalWrite(bombaPin, valor_Bomba ? HIGH : LOW);
 
-  // Calcular distancia (cm)
-  distance = duration * 0.034 / 2;
-
+  // Medir distancia
+  long distancia = medirDistanciaPromedio();
   Serial.print("Distancia medida: ");
-  Serial.print(distance);
+  Serial.print(distancia);
   Serial.println(" cm");
 
-  // Determinar nivel del estanque y controlar la bomba
-  if (distance <= DISTANCIA_VACIO) {
-    Serial.println("Estado: Estanque vacío. Encendiendo la bomba.");
-    digitalWrite(bombaPin, HIGH); // Encender la bomba
-  } else if (distance >= DISTANCIA_LLENO) {
-    Serial.println("Estado: Estanque lleno. Apagando la bomba.");
-    digitalWrite(bombaPin, LOW);  // Apagar la bomba
-  } else {
-    Serial.println("Estado: Nivel intermedio. Manteniendo la bomba apagada.");
-    digitalWrite(bombaPin, LOW);  // Mantener la bomba apagada
+  // Controlar el estado de la bomba basado en la distancia
+  if (distancia >= DISTANCIA_VACIO) {
+    bombaEncendida = true;
+  } else if (distancia <= DISTANCIA_LLENO) {
+    bombaEncendida = false;
   }
 
-  // Enviar datos a ThingSpeak
-  int status = ThingSpeak.writeField(myChannelNumber, 1, distance, myWriteAPIKey);
+  // Actualizar los valores en ThingSpeak
+  ThingSpeak.setField(fieldsensor, distancia);
+  ThingSpeak.setField(fieldBomba, bombaEncendida ? 1 : 0);
+
+  int status = ThingSpeak.writeFields(channelID, SECRET_WRITE_APIKEY);
   if (status == 200) {
     Serial.println("Actualización exitosa en ThingSpeak.");
   } else {
-    Serial.println("Error al actualizar el canal. Código HTTP: " + String(status));
+    Serial.print("Error al enviar datos. Código HTTP: ");
+    Serial.println(status);
   }
 
-  delay(1000);  // Espera 1 segundo para enviar el siguiente dato
+  delay(15000);  // Espera 15 segundos para enviar el siguiente dato
 }
