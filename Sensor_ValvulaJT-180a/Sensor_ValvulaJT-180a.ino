@@ -23,117 +23,162 @@
   Copyright 2020, The MathWorks, Inc.
 */
 #include <ESP8266WiFi.h>
-#include "secrets.h"
+#include <ESP8266HTTPClient.h>
+#include <ArduinoJson.h>
 #include "ThingSpeak.h" // Siempre incluir después de otros encabezados
+#include "secrets.h"    // Archivo con las credenciales y configuración
 
+// Pines de control de la bomba mecánica
+const int IN1 = 9;  // Pin digital para encender la bomba
+const int IN2 = 10; // Pin digital para apagar la bomba
 
-// Configuración de red WiFi
+// Pines del sensor ultrasónico (opcional si también se mide nivel del agua)
+const int Trigger = 13;
+const int Echo = 12;
+
+// Configuración de niveles
+const int DISTANCIA_VACIO = 24;  // Estanque vacío
+const int DISTANCIA_LLENO = 15;  // Estanque lleno
+
+// Variables para medir nivel del estanque
 WiFiClient client;
+HTTPClient http;
 
-// Pines del sensor ultrasónico
-const int Trigger = 13;  // Pin TRIG del sensor
-const int Echo = 12;     // Pin ECHO del sensor
+unsigned long tiempoUltimaMedicion = 0;
+unsigned long intervaloMedicion = 15000; // Medir cada 15 segundos
 
-// Pin de control de la bomba
-const int bombaPin = 5;  // Pin digital para controlar la bomba (usa un transistor o relé)
-
-// Niveles de agua
-const int DISTANCIA_VACIO = 24;  // Distancia considerada como estanque vacío (cm)
-const int DISTANCIA_LLENO = 20;  // Distancia considerada como estanque lleno (cm)
-
-// Channel details
-unsigned long channelID = SECRET_CH_ID;
-unsigned int fieldsensor = 1;
-unsigned int fieldBomba = 2;
-
-// Estado inicial de la bomba
-bool bombaEncendida = false; // Variable para rastrear si la bomba está encendida
+// URL de ThingSpeak para leer y escribir
+String readApiUrl = "http://api.thingspeak.com/channels/" + String(SECRET_CH_ID) +
+                    "/fields/2.json?api_key=" + String(SECRET_READ_APIKEY) + "&results=1";
 
 void setup() {
-  Serial.begin(115200);           // Inicializa la comunicación serial
-  pinMode(Trigger, OUTPUT);       // Configura Trigger como salida
-  pinMode(Echo, INPUT);           // Configura Echo como entrada
-  pinMode(bombaPin, OUTPUT);      // Configura el pin de la bomba como salida
-  digitalWrite(Trigger, LOW);     // Inicializa Trigger en LOW
-  digitalWrite(bombaPin, LOW);    // Apaga la bomba al inicio
+  Serial.begin(115200);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(Trigger, OUTPUT);
+  pinMode(Echo, INPUT);
 
-  WiFi.mode(WIFI_STA);            // Configura el ESP8266 como estación
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+
+  // Conexión Wi-Fi
+  Serial.println("Conectando al Wi-Fi...");
   WiFi.begin(SECRET_SSID, SECRET_PASS);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nConexión WiFi establecida.");
-  ThingSpeak.begin(client);       // Inicializa ThingSpeak
+  Serial.println("\nWi-Fi conectado.");
+  ThingSpeak.begin(client);
 }
 
+// Función para medir nivel del estanque (promedio)
 long medirDistanciaPromedio() {
   long suma = 0;
-  int mediciones = 5; // Número de mediciones para promediar
+  int mediciones = 5;
 
   for (int i = 0; i < mediciones; i++) {
     digitalWrite(Trigger, HIGH);
     delayMicroseconds(10);
     digitalWrite(Trigger, LOW);
 
-    long duration = pulseIn(Echo, HIGH);
-    long distance = duration * 0.034 / 2;
-
-    suma += distance;
-    delay(10); // Pequeña pausa entre mediciones
+    long duracion = pulseIn(Echo, HIGH);
+    long distancia = duracion * 0.034 / 2;
+    suma += distancia;
+    delay(10);
   }
-
-  return suma / mediciones; // Retorna la distancia promedio
+  return suma / mediciones;
 }
 
-void loop() {
-  // Verificar conexión WiFi
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Desconectado de WiFi. Reconectando...");
-    while (WiFi.status() != WL_CONNECTED) {
-      WiFi.begin(SECRET_SSID, SECRET_PASS);
-      delay(5000);
+// Leer estado de la bomba desde ThingSpeak (field2)
+void leerEstadoBomba() {
+  HTTPClient http;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    http.begin(client, readApiUrl); //Usar el objeto WIFICLient y la URL
+    int httpCode = http.GET(); //REaliza una peticion GET
+
+    if (httpCode > 0) { //si la respuesta es exitosa
+      String payload = http.getString(); //Obtiene la respuesta
+      Serial.println("Respuesta de ThingSpeak: " + payload);
+
+      // Parsear el JSON
+      StaticJsonDocument<256> doc;
+      DeserializationError error = deserializeJson(doc, payload);
+
+      if (error) {
+        Serial.print("Error al parsear JSON: ");
+        Serial.println(error.c_str());
+      } else {
+        String fieldValue = doc["feeds"][0]["field2"] | "0"; // Leer el último valor de field2
+        Serial.print("Valor recibido (field2): ");
+        Serial.println(fieldValue);
+
+        // Controlar la bomba manualmente
+        if (fieldValue == "1") {
+          Serial.println("Encendiendo la bomba...");
+          digitalWrite(IN1, HIGH);
+          digitalWrite(IN2, LOW);
+        } else if (fieldValue == "0") {
+          Serial.println("Apagando la bomba...");
+          digitalWrite(IN1, LOW);
+          digitalWrite(IN2, LOW);
+        } else {
+          Serial.println("Valor inválido. Apagando bomba por seguridad.");
+          digitalWrite(IN1, LOW);
+          digitalWrite(IN2, LOW);
+        }
+      }
+    } else {
+      Serial.println("Error al obtener datos de ThingSpeak.");
+      digitalWrite(IN1, LOW);
+      digitalWrite(IN2, LOW); // Seguridad: Apagar la bomba si hay error
     }
-    Serial.println("Reconectado a WiFi.");
+    http.end();
+  } else {
+    Serial.println("Wi-Fi desconectado. Intentando reconectar...");
+    WiFi.begin(SECRET_SSID, SECRET_PASS);
   }
+}
 
-  // Leer valores desde ThingSpeak
-  long valor_Sensor = ThingSpeak.readLongField(channelID, fieldsensor, SECRET_READ_APIKEY);
-  long valor_Bomba = ThingSpeak.readLongField(channelID, fieldBomba, SECRET_READ_APIKEY);
+// Escribir datos en ThingSpeak
+void escribirDatosThingSpeak(int nivel, int estadoBomba) {
+  ThingSpeak.setField(1, nivel);              // Escribir nivel del estanque en field1
+  ThingSpeak.setField(2, estadoBomba);        // Escribir estado de la bomba en field2
 
-  Serial.print("Valor Sensor: ");
-  Serial.println(valor_Sensor);
-  Serial.print("Valor Bomba: ");
-  Serial.println(valor_Bomba);
-
-  // Escribir valores en los pines
-  digitalWrite(Trigger, valor_Sensor ? HIGH : LOW);
-  digitalWrite(bombaPin, valor_Bomba ? HIGH : LOW);
-
-  // Medir distancia
-  long distancia = medirDistanciaPromedio();
-  Serial.print("Distancia medida: ");
-  Serial.print(distancia);
-  Serial.println(" cm");
-
-  // Controlar el estado de la bomba basado en la distancia
-  if (distancia >= DISTANCIA_VACIO) {
-    bombaEncendida = true;
-  } else if (distancia <= DISTANCIA_LLENO) {
-    bombaEncendida = false;
-  }
-
-  // Actualizar los valores en ThingSpeak
-  ThingSpeak.setField(fieldsensor, distancia);
-  ThingSpeak.setField(fieldBomba, bombaEncendida ? 1 : 0);
-
-  int status = ThingSpeak.writeFields(channelID, SECRET_WRITE_APIKEY);
+  int status = ThingSpeak.writeFields(SECRET_CH_ID, SECRET_WRITE_APIKEY);
   if (status == 200) {
-    Serial.println("Actualización exitosa en ThingSpeak.");
+    Serial.println("Datos enviados correctamente a ThingSpeak.");
   } else {
     Serial.print("Error al enviar datos. Código HTTP: ");
     Serial.println(status);
   }
+}
 
-  delay(15000);  // Espera 15 segundos para enviar el siguiente dato
+void loop() {
+  unsigned long tiempoActual = millis();
+
+  // Leer estado de la bomba desde ThingSpeak
+  leerEstadoBomba();
+
+  // Cada intervalo, medir nivel del estanque y enviar datos
+  if (tiempoActual - tiempoUltimaMedicion >= intervaloMedicion) {
+    tiempoUltimaMedicion = tiempoActual;
+
+    long distancia = medirDistanciaPromedio();
+    int nivelPorcentaje = map(distancia, DISTANCIA_VACIO, DISTANCIA_LLENO, 0, 100);
+    nivelPorcentaje = constrain(nivelPorcentaje, 0, 100);
+
+    Serial.print("Nivel del estanque: ");
+    Serial.print(nivelPorcentaje);
+    Serial.println("%");
+
+    // Obtener estado de la bomba actual
+    int estadoBomba = (digitalRead(IN1) == HIGH) ? 1 : 0;
+
+    // Enviar datos a ThingSpeak
+    escribirDatosThingSpeak(nivelPorcentaje, estadoBomba);
+  }
+
+  delay(15000); // Esperar antes de la próxima iteración
 }
