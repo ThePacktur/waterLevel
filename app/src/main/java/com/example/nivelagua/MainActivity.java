@@ -16,7 +16,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvNivelAgua;
     private Button btnEncenderBomba, btnApagarBomba;
 
-    private final String READ_API_KEY = "BIQ169NLKIRSRNIO";
+    private final String READ_API_KEY = "FQ7RL8L4TV3RK4K0";
     private final String WRITE_API_KEY = "A0T3NQX2W7RSGMOW";
     private final String CHANNEL_ID = "2782709";
 
@@ -74,7 +74,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void controlarBomba(int estado) {
-        String url = "https://api.thingspeak.com/channels/2782709/feeds.json?api_key=BIQ169NLKIRSRNIO&results=2";
+        String url = "https://api.thingspeak.com/channels/2782709/feeds.json?api_key=FQ7RL8L4TV3RK4K0&results=2";
         AsyncHttpClient client = new AsyncHttpClient();
 
         RequestParams params = new RequestParams();
