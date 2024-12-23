@@ -6,5 +6,5 @@
 
 // Detalles del canal ThingSpeak
 #define SECRET_CH_ID 2782709               // Número del canal
-#define SECRET_WRITE_APIKEY "A0T3NQX2W7RSGMOW" // Clave API de escritura
-#define SECRET_READ_APIKEY "FQ7RL8L4TV3RK4K0"  // Clave API de lectura
+#define SECRET_WRITE_APIKEY "EW65PRKCOEEZ50GI" // Clave API de escritura
+#define SECRET_READ_APIKEY "Y110M1MLLT8Q74CR"  // Clave API de lectura
