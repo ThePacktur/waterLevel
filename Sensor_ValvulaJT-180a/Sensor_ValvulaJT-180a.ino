@@ -25,15 +25,14 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <ArduinoJson.h>
-#include "ThingSpeak.h" // Siempre incluir después de otros encabezados
 
-// Configuración Wi-Fi
+// Credenciales WiFi
 const char* ssid = "Packtur";
 const char* password = "Julieta2022.";
 
-// Pines de control de la bomba mecánica
-const int IN1 = 2;  // Pin digital para encender la bomba
-const int IN2 = 15; // Pin digital para apagar la bomba
+// Pines de control de la bomba
+const int IN1 = 15;
+const int IN2 = 2;
 
 // Pines del sensor ultrasónico
 const int Trigger = 13;
@@ -43,31 +42,25 @@ const int Echo = 12;
 const int DISTANCIA_VACIO = 24;  // Estanque vacío en cm
 const int DISTANCIA_LLENO = 15;  // Estanque lleno en cm
 
-// Configuración ThingSpeak
-const char* writeApiUrl = "http://api.thingspeak.com/update";
-const char* readApiUrl = "https://api.thingspeak.com/channels/2782709/fields/1.json?api_key=Y110M1MLLT8Q74CR";
-const char* apiKey = "EW65PRKCOEEZ50GI";
-
-// Variables para medir nivel del estanque
-WiFiClient client;             // Cliente para HTTP
-WiFiClientSecure secureClient; // Cliente para HTTPS
-HTTPClient http;
-
-
-unsigned long tiempoUltimaMedicion = 0;
-unsigned long intervaloMedicion = 15000; // Medir cada 15 segundos
+// API de ThingSpeak
+const char* writeApiUrl = "http://api.thingspeak.com/update";  // URL para enviar datos
+const char* readApiEndpoint = "http://api.thingspeak.com/channels/2794877/fields/1/last.json?api_key=UBC8TC9O5HMP0J21";
+const char* apiKey = "6OOFLKLG096IP2Y8"; 
 
 void setup() {
   Serial.begin(115200);
+  
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
   pinMode(Trigger, OUTPUT);
   pinMode(Echo, INPUT);
 
+  // Bomba apagada por defecto
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, LOW);
+  Serial.println("Bomba apagada al iniciar.");
 
-  // Conexión Wi-Fi
+  // Conexión a Wi-Fi
   Serial.println("Conectando al Wi-Fi...");
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
@@ -75,15 +68,13 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("\nWi-Fi conectado.");
-
-  // Configuración del cliente seguro
-  secureClient.setInsecure(); // Desactiva la verificación de certificados (no recomendado en producción)
 }
 
-
 void loop() {
-  unsigned long tiempoActual = millis();
   if (WiFi.status() == WL_CONNECTED) {
+    WiFiClient client;
+    HTTPClient http;
+
     // Medir nivel del estanque usando el sensor ultrasónico
     digitalWrite(Trigger, LOW);
     delayMicroseconds(2);
@@ -95,8 +86,9 @@ void loop() {
     float distance = (duration / 2.0) * 0.0343; // Convertir duración en cm
 
     // Calcular porcentaje del nivel del estanque
-    float porcentaje = map(distance, DISTANCIA_VACIO, DISTANCIA_LLENO, 0, 100);
-    porcentaje = constrain(porcentaje, 0, 100);
+    // A mayor distancia, menor nivel de agua (porcentaje bajo)
+    float porcentaje = map(distance, DISTANCIA_LLENO, DISTANCIA_VACIO, 0, 100); 
+    porcentaje = constrain(porcentaje, 0, 100);  // Asegurarse de que el porcentaje esté entre 0 y 100
 
     // Mostrar datos en el monitor serie
     Serial.print("Distancia medida: ");
@@ -106,8 +98,8 @@ void loop() {
     Serial.print(porcentaje);
     Serial.println("%");
 
-    // Enviar datos del porcentaje a ThingSpeak
-    String url = String(writeApiUrl) + "?api_key=" + apiKey + "&field1=" + String(porcentaje, 2);
+    // Enviar datos del porcentaje a ThingSpeak (field2)
+    String url = String(writeApiUrl) + "?api_key=" + apiKey + "&field2=" + String(porcentaje, 2);
     http.begin(client, url);
     int httpResponseCode = http.GET();
     if (httpResponseCode > 0) {
@@ -117,8 +109,8 @@ void loop() {
     }
     http.end();
 
-    // Leer estado de la bomba desde ThingSpeak (field2)
-    http.begin(client, readApiUrl);
+    // Leer estado de la bomba desde ThingSpeak (field1)
+    http.begin(client, readApiEndpoint);
     int responseCode = http.GET();
 
     if (responseCode > 0) {
@@ -133,16 +125,16 @@ void loop() {
         Serial.print("Error al parsear JSON: ");
         Serial.println(error.c_str());
       } else {
-        String fieldValue = doc["field2"] | "0";  // Leer field2
-        Serial.print("Valor recibido (field2): ");
+        String fieldValue = doc["field1"] | "0";  // Leer field1 (bomba)
+        Serial.print("Valor recibido (field1): ");
         Serial.println(fieldValue);
 
-        // Controlar la bomba manualmente
+        // **Controlar la bomba manualmente**
         if (fieldValue == "1") {
           Serial.println("Encendiendo la bomba. Agua fluyendo...");
           digitalWrite(IN1, HIGH);
           digitalWrite(IN2, LOW);
-          delay(1000);
+          delay(1000);  // Ajustar duración del flujo de agua según necesidad
         } else if (fieldValue == "0") {
           Serial.println("Apagando la bomba.");
           digitalWrite(IN1, LOW);
@@ -155,14 +147,15 @@ void loop() {
       }
     } else {
       Serial.println("Error al obtener datos de ThingSpeak.");
+      // Seguridad: Apagar la bomba si hay error
       digitalWrite(IN1, LOW);
       digitalWrite(IN2, LOW);
     }
     http.end();
   } else {
     Serial.println("Error: Wi-Fi desconectado. Intentando reconectar...");
-    WiFi.begin(ssid, password);
+    WiFi.begin(ssid, password);  // Intentar reconexión Wi-Fi
   }
 
-  delay(15000); // Espera 15 segundos antes de la siguiente iteración
+  delay(15000);  // Espera 15 segundos antes de la siguiente iteración
 }
