@@ -21,15 +21,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvNivelAgua: TextView
     private lateinit var btnEncenderBomba: Button
     private lateinit var btnApagarBomba: Button
+    private lateinit var statusTextView: TextView
 
     // URLs ajustadas con las claves API correctas
-    private val apiUrl = "https://api.thingspeak.com/channels/2782709/feeds.json?api_key=Y110M1MLLT8Q74CR&results=1"
-    private val encenderBombaUrl = "https://api.thingspeak.com/update?api_key=EW65PRKCOEEZ50GI&field1=1"
-    private val apagarBombaUrl = "https://api.thingspeak.com/update?api_key=EW65PRKCOEEZ50GI&field1=0"
+    private val apiUrl = "https://api.thingspeak.com/channels/2794906/feeds.json?api_key=C97GIGD0F1TEDLEA&results=2"
+    private val encenderBombaUrl = "https://api.thingspeak.com/update?api_key=JKSIACHDLS2LCCWI&field3=1"
+    private val apagarBombaUrl = "https://api.thingspeak.com/update?api_key=JKSIACHDLS2LCCWI&field3=0"
     private val client = OkHttpClient()
 
     private val handler = Handler(Looper.getMainLooper())
-    private val updateInterval = 5000L // Actualización cada 5 segundos
+    private val updateInterval = 2000L // Actualización cada 2 segundos
 
     @RequiresApi(Build.VERSION_CODES.M)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,6 +41,7 @@ class MainActivity : AppCompatActivity() {
         tvNivelAgua = findViewById(R.id.tvNivelAgua)
         btnEncenderBomba = findViewById(R.id.btnEncenderBomba)
         btnApagarBomba = findViewById(R.id.btnApagarBomba)
+        statusTextView = findViewById(R.id.statusTextView)
 
         // Iniciar actualización automática
         startAutoUpdate()
@@ -49,7 +51,7 @@ class MainActivity : AppCompatActivity() {
             if (isInternetAvailable()) {
                 controlarBomba(encenderBombaUrl, "Bomba encendida!")
             } else {
-                mostrarErrorConexion()
+                statusTextView.text = "Sin conexión a Internet. No se puede encender la bomba."
             }
         }
 
@@ -57,7 +59,7 @@ class MainActivity : AppCompatActivity() {
             if (isInternetAvailable()) {
                 controlarBomba(apagarBombaUrl, "Bomba apagada!")
             } else {
-                mostrarErrorConexion()
+                statusTextView.text = "Sin conexión a Internet. No se puede apagar la bomba."
             }
         }
     }
@@ -102,6 +104,7 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+
     private fun controlarBomba(url: String, successMessage: String) {
         val request = Request.Builder().url(url).build()
         client.newCall(request).enqueue(object : Callback {
@@ -128,6 +131,7 @@ class MainActivity : AppCompatActivity() {
         return try {
             val gson = Gson()
             val response = gson.fromJson(json, ThingSpeakResponse::class.java)
+            // Accede a field2 para obtener el nivel de agua en porcentaje
             response.feeds.getOrNull(0)?.field1
         } catch (e: Exception) {
             Log.e("ParseNivelAgua", "Error al parsear JSON: ${e.message}")
@@ -152,6 +156,11 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "Sin conexión a Internet", Toast.LENGTH_SHORT).show()
     }
 }
+data class ThingSpeakResponse(
+    val feeds: List<Feed>
+)
 
-data class ThingSpeakResponse(val feeds: List<Feed>)
-data class Feed(val field1: String?)
+data class Feed(
+    val field1: String?,   // Nivel de agua en porcentaje
+    val field3: String?   // Estado de la bomba (encendida o apagada)
+)

@@ -23,12 +23,20 @@
   Copyright 2020, The MathWorks, Inc.
 */
 #include <ESP8266WiFi.h>
+#include <WiFiClientSecure.h>
 #include <ESP8266HTTPClient.h>
 #include <ArduinoJson.h>
+#include "secrets.h"
+#include "ThingSpeak.h"  // always include thingspeak header file after other header files and custom macros
 
-// Credenciales WiFi
-const char* ssid = "Packtur";
-const char* password = "Julieta2022.";
+char ssid[] = SECRET_SSID;   // your network SSID (name)
+char pass[] = SECRET_PASS;   // your network password
+
+WiFiClientSecure client;  // Usamos WiFiClientSecure para HTTPS
+
+unsigned long myChannelNumber = SECRET_CH_ID;
+const char * myWriteAPIKey = SECRET_WRITE_APIKEY;
+const char * myReadAPIKey = SECRET_READ_APIKEY;
 
 // Pines de control de la bomba
 const int IN1 = 15;
@@ -41,11 +49,6 @@ const int Echo = 12;
 // Configuración de niveles
 const int DISTANCIA_VACIO = 24;  // Estanque vacío en cm
 const int DISTANCIA_LLENO = 15;  // Estanque lleno en cm
-
-// API de ThingSpeak
-const char* writeApiUrl = "http://api.thingspeak.com/update";  // URL para enviar datos
-const char* readApiEndpoint = "http://api.thingspeak.com/channels/2794877/fields/1/last.json?api_key=UBC8TC9O5HMP0J21";
-const char* apiKey = "6OOFLKLG096IP2Y8"; 
 
 void setup() {
   Serial.begin(115200);
@@ -62,7 +65,7 @@ void setup() {
 
   // Conexión a Wi-Fi
   Serial.println("Conectando al Wi-Fi...");
-  WiFi.begin(ssid, password);
+  WiFi.begin(ssid, pass);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
@@ -72,7 +75,6 @@ void setup() {
 
 void loop() {
   if (WiFi.status() == WL_CONNECTED) {
-    WiFiClient client;
     HTTPClient http;
 
     // Medir nivel del estanque usando el sensor ultrasónico
@@ -86,8 +88,7 @@ void loop() {
     float distance = (duration / 2.0) * 0.0343; // Convertir duración en cm
 
     // Calcular porcentaje del nivel del estanque
-    // A mayor distancia, menor nivel de agua (porcentaje bajo)
-    float porcentaje = map(distance, DISTANCIA_LLENO, DISTANCIA_VACIO, 0, 100); 
+    float porcentaje = map(distance, DISTANCIA_LLENO, DISTANCIA_VACIO, 0, 100);
     porcentaje = constrain(porcentaje, 0, 100);  // Asegurarse de que el porcentaje esté entre 0 y 100
 
     // Mostrar datos en el monitor serie
@@ -98,19 +99,21 @@ void loop() {
     Serial.print(porcentaje);
     Serial.println("%");
 
-    // Enviar datos del porcentaje a ThingSpeak (field2)
-    String url = String(writeApiUrl) + "?api_key=" + apiKey + "&field2=" + String(porcentaje, 2);
-    http.begin(client, url);
+    // Construir URL para enviar datos (uso de HTTPS)
+    String url = String("https://api.thingspeak.com/update?api_key=") + myWriteAPIKey + "&field1=" + String(porcentaje, 2);
+    client.setInsecure();  // Deshabilitar la verificación del certificado SSL (no recomendado para producción)
+    http.begin(client, url);  // Usar HTTPS
     int httpResponseCode = http.GET();
     if (httpResponseCode > 0) {
-      Serial.println("Porcentaje enviado correctamente a ThingSpeak.");
+      Serial.println("Porcentaje enviada correctamente a ThingSpeak.");
     } else {
       Serial.println("Error al enviar los datos del porcentaje.");
     }
     http.end();
 
-    // Leer estado de la bomba desde ThingSpeak (field1)
-    http.begin(client, readApiEndpoint);
+    // Leer estado de la bomba desde ThingSpeak (field2)
+    String readUrl = String("https://api.thingspeak.com/channels/") + String(myChannelNumber) + "/fields/3/last.json?api_key=" + myReadAPIKey;
+    http.begin(client, readUrl);  // Usar HTTPS
     int responseCode = http.GET();
 
     if (responseCode > 0) {
@@ -125,8 +128,8 @@ void loop() {
         Serial.print("Error al parsear JSON: ");
         Serial.println(error.c_str());
       } else {
-        String fieldValue = doc["field1"] | "0";  // Leer field1 (bomba)
-        Serial.print("Valor recibido (field1): ");
+        String fieldValue = doc["field3"] | "0";  // Leer field2 (bomba)
+        Serial.print("Valor recibido (field3): ");
         Serial.println(fieldValue);
 
         // **Controlar la bomba manualmente**
@@ -154,7 +157,7 @@ void loop() {
     http.end();
   } else {
     Serial.println("Error: Wi-Fi desconectado. Intentando reconectar...");
-    WiFi.begin(ssid, password);  // Intentar reconexión Wi-Fi
+    WiFi.begin(ssid, pass);  // Intentar reconexión Wi-Fi
   }
 
   delay(15000);  // Espera 15 segundos antes de la siguiente iteración
